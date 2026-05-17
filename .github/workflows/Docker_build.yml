@@ -95,7 +95,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*❌ Docker Build Failed*\n🔖 Репозиторий: `${{ github.repository }}`\n🔗 Ветка: `${{ github.ref_name }}`\n🔢 Коммит: `${{ github.sha::7 }}`"
+                    "text": "*❌ Docker Build Failed*\n🔖 Репозиторий: `${{ github.repository }}`\n🔗 Ветка: `${{ github.ref_name }}`\n🔢 "
                   }
                 },
                 {
