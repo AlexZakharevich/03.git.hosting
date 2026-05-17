@@ -37,7 +37,7 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push Docker images
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v5
         with:
           context: ./08.Docker.DockerCompose/hw2
           push: true
