@@ -27,6 +27,6 @@ jobs:
       - name: Build and push Docker images
         uses: docker/build-push-action@v2
         with:
-          context: .
+          context: ./08.Docker.Docker-compose/hw2
           push: true
           tags: ghcr.io/alexzakharevich/git:v1
