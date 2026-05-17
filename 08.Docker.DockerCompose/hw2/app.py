@@ -1,13 +1,11 @@
-import sys
+from flask import Flask
+import os
 
-def factorial(n):
-    if n < 0:
-        return "Ошибка: отрицательное число"
-    result = 1
-    for i in range(1, n + 1):
-        result *= i
-    return result
+app = Flask(__name__)
 
-if __name__ == "__main__":
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    print(f"Факториал {n} = {factorial(n)}")
+@app.route('/')
+def hello():
+    return f"Hello from Docker! Container hostname: {os.uname().nodename}"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)

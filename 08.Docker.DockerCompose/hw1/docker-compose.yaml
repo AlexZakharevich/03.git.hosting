@@ -18,7 +18,7 @@ services:
 
   web:
     build:
-      context: ./app
+      context: .
     container_name: app_web
     ports:
       - "5050:5000"
