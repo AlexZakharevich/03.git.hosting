@@ -42,7 +42,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          #cache-to: type=gha,mode=max
           #tags: ghcr.io/alexzakharevich/my_flask_app:v1
  
       - name: Notify Slack on Success
