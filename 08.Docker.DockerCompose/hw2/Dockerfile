@@ -3,6 +3,9 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
+# Устанавливаем Flask в изолированную директорию
+RUN pip install --prefix=/install flask
+
 # Копируем исходный код
 COPY app.py .
 
@@ -15,12 +18,14 @@ FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
-# Копируем только скомпилированный файл со стадии сборки
-COPY --from=builder /build/__pycache__/app.cpython-311.pyc /app/app.pyc
+# Копируем только установленные зависимости со стадии сборки
+COPY --from=builder /install /usr/local
 
-# Создаём скрипт для запуска
-RUN echo '#!/bin/bash\npython3 -c "import app; print(app.factorial(10))"' > /app/run.sh && \
-    chmod +x /app/run.sh
+# Копируем исходный код (для веб-приложений .py удобнее, чем .pyc)
+COPY --from=builder /build/app.py /app/app.py
 
-# Запускаем приложение
-CMD ["/app/run.sh"]
+# Указываем порт, который слушает Flask
+EXPOSE 5000
+
+# Запускаем приложение напрямую
+CMD ["python", "app.py"]
