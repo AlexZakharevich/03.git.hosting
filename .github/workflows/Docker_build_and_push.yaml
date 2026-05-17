@@ -26,13 +26,16 @@ jobs:
 
       - name: 🏷️ Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v5  # ← Обязательно v5!
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           flavor: |
-            lowercase=true
+            lowercase=true  # ✅ Теперь работает
+            prefix=
+            suffix=
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
