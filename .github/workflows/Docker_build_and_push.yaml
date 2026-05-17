@@ -24,20 +24,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.CR_TOKEN }}
 
-      - name: 🏷️ Extract metadata
+      - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5  # ← Обязательно v5!
+        uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            lowercase=true  # ✅ Теперь работает
-            prefix=
-            suffix=
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=
 
       - name: Build and push Docker images
         uses: docker/build-push-action@v5
