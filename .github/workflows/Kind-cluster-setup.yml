@@ -1,0 +1,60 @@
+name: KinD Cluster Setup
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  kind-cluster:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+          sudo systemctl start docker
+          sudo systemctl status docker
+      
+      - name: Install KinD
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+      
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+      
+      - name: Create KinD cluster
+        run: |
+          cat <<EOF > kind-config.yaml
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+          EOF
+          time kind create cluster --config kind-config.yaml --name github-kind
+      
+      - name: Verify cluster
+        run: |
+          kubectl cluster-info --context kind-github-kind
+          kubectl get nodes
+          kubectl get pods -A
+          kubectl version --short
+      
+      - name: Show cluster info
+        run: |
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide
+          echo "=== Version ==="
+          kubectl version --short
+          echo "=== Cluster ready ==="

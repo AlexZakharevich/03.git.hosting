@@ -1,0 +1,51 @@
+name: Minikube Cluster Setup
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  minikube-cluster:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Minikube
+        run: |
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+          minikube version
+      
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+      
+      - name: Start Minikube cluster
+        run: |
+          time minikube start --driver=docker --kubernetes-version=stable --cpus=2 --memory=4096
+      
+      - name: Verify cluster
+        run: |
+          minikube status
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl get pods -A
+      
+      - name: Get cluster details
+        run: |
+          echo "=== Number of nodes ==="
+          kubectl get nodes --no-headers | wc -l
+          echo "=== Kubernetes version ==="
+          kubectl version --short
+          echo "=== Minikube version ==="
+          minikube version
+      
+      - name: Stop Minikube
+        run: |
+          minikube stop
