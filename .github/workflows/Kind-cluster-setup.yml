@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 jobs:
   kind-cluster:
@@ -13,48 +14,36 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Install Docker
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker.io
-          sudo systemctl start docker
-          sudo systemctl status docker
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.30.0'
+        id: install
       
-      - name: Install KinD
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
-          kind version
-      
-      - name: Install kubectl
-        run: |
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-          kubectl version --client
-      
-      - name: Create KinD cluster
-        run: |
-          cat <<EOF > kind-config.yaml
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          nodes:
-          - role: control-plane
-          EOF
-          time kind create cluster --config kind-config.yaml --name github-kind
+      - name: Setup KinD
+        uses: helm/kind-action@v1.10.0
+        with:
+          version: v0.24.0
+          cluster_name: kind-cluster
+          wait: 120
+          node_image: kindest/node:v1.30.0
       
       - name: Verify cluster
         run: |
-          kubectl cluster-info --context kind-github-kind
-          kubectl get nodes
-          kubectl get pods -A
-          kubectl version --short
-      
-      - name: Show cluster info
-        run: |
+          echo "=== Cluster Info ==="
+          kubectl cluster-info
           echo "=== Nodes ==="
           kubectl get nodes -o wide
-          echo "=== Version ==="
-          kubectl version --short
-          echo "=== Cluster ready ==="
+          echo "=== Pods in all namespaces ==="
+          kubectl get pods -A
+          echo "=== Node count ==="
+          kubectl get nodes --no-headers | wc -l
+          echo "=== Kubernetes Version ==="
+          kubectl version --short || kubectl version
+      
+      - name: Get cluster details
+        run: |
+          echo "## Кластер KinD" >> $GITHUB_STEP_SUMMARY
+          echo "- Узлов: $(kubectl get nodes --no-headers | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- Версия Kubernetes: $(kubectl version -o json | jq -r '.serverVersion.gitVersion')" >> $GITHUB_STEP_SUMMARY
+          echo "- Время создания: $(date)" >> $GITHUB_STEP_SUMMARY

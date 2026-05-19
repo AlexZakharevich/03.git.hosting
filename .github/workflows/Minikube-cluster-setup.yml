@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - master
+  workflow_dispatch:
 
 jobs:
   minikube-cluster:
@@ -13,39 +14,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Install Minikube
-        run: |
-          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-          sudo install minikube-linux-amd64 /usr/local/bin/minikube
-          minikube version
+      - name: Setup Minikube
+        uses: medyagh/setup-minikube@v0.0.18
+        with:
+          minikube-version: 'v1.38.0'
+          driver: docker
+          kubernetes-version: 'v1.30.0'
+          start-args: '--cpus=2 --memory=4096'
       
-      - name: Install kubectl
-        run: |
-          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-          kubectl version --client
-      
-      - name: Start Minikube cluster
-        run: |
-          time minikube start --driver=docker --kubernetes-version=stable --cpus=2 --memory=4096
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.30.0'
       
       - name: Verify cluster
         run: |
+          echo "=== Minikube Status ==="
           minikube status
+          echo "=== Cluster Info ==="
           kubectl cluster-info
-          kubectl get nodes
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide
+          echo "=== Pods in all namespaces ==="
           kubectl get pods -A
       
       - name: Get cluster details
         run: |
-          echo "=== Number of nodes ==="
-          kubectl get nodes --no-headers | wc -l
-          echo "=== Kubernetes version ==="
-          kubectl version --short
-          echo "=== Minikube version ==="
-          minikube version
+          echo "## Кластер Minikube" >> $GITHUB_STEP_SUMMARY
+          echo "- Узлов: $(kubectl get nodes --no-headers | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- Версия Kubernetes: $(kubectl version -o json | jq -r '.serverVersion.gitVersion')" >> $GITHUB_STEP_SUMMARY
+          echo "- Версия Minikube: $(minikube version)" >> $GITHUB_STEP_SUMMARY
+          echo "- Время создания: $(date)" >> $GITHUB_STEP_SUMMARY
       
-      - name: Stop Minikube
+      - name: Show timing information
         run: |
-          minikube stop
+          echo "=== Timing ==="
+          echo "Cluster ready at: $(date)"
+          START_TIME=$(date +%s)
+          echo "Если нужно замерить время запуска - проверьте логи выше"
+      
+      - name: Run tests (optional)
+        run: |
+          # Проверяем, что кластер работает
+          kubectl run test-pod --image=nginx --restart=Never
+          kubectl wait --for=condition=ready pod/test-pod --timeout=60s
+          kubectl delete pod test-pod
+          echo "✅ Кластер работает корректно"
