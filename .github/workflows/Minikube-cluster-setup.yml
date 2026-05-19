@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Setup Minikube
-        uses: medyagh/setup-minikube@v0.0.18
+        uses: medyagh/setup-minikube@latest
         with:
           minikube-version: 'v1.38.0'
           driver: docker
