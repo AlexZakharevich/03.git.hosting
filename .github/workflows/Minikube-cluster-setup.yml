@@ -46,17 +46,3 @@ jobs:
           echo "- Версия Minikube: $(minikube version)" >> $GITHUB_STEP_SUMMARY
           echo "- Время создания: $(date)" >> $GITHUB_STEP_SUMMARY
       
-      - name: Show timing information
-        run: |
-          echo "=== Timing ==="
-          echo "Cluster ready at: $(date)"
-          START_TIME=$(date +%s)
-          echo "Если нужно замерить время запуска - проверьте логи выше"
-      
-      - name: Run tests (optional)
-        run: |
-          # Проверяем, что кластер работает
-          kubectl run test-pod --image=nginx --restart=Never
-          kubectl wait --for=condition=ready pod/test-pod --timeout=60s
-          kubectl delete pod test-pod
-          echo "✅ Кластер работает корректно"
