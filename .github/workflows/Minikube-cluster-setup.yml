@@ -17,10 +17,10 @@ jobs:
       - name: Setup Minikube
         uses: manusa/actions-setup-minikube@v2.10.0
         with:
-          minikube-version: 'v1.38.0'
+          minikube version: 'v1.32.0'
+          kubernetes version: 'v1.27.2'
           driver: docker
-          kubernetes-version: 'v1.30.0'
-          start-args: '--cpus=2 --memory=4096'
+          start args: '--memory=4096 --cpus=2'
       
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
