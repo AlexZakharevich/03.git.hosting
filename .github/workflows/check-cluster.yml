@@ -9,33 +9,75 @@ jobs:
   monitor:
     runs-on: self-hosted
     steps:
-      - name: Send status to Slack
+      - name: Check all K8s contexts
         env:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          # Получаем статус
-          if kubectl get pods --all-namespaces | grep -qE "Error|CrashLoopBackOff|ImagePullBackOff|Pending"; then
-            STATUS="FAILED"
-            EMOJI="❌"
+          # Получаем все контексты
+          CONTEXTS=$(kubectl config get-contexts -o name)
+          
+          # Создаём отчёт
+          REPORT="=== 🌍 KUBERNETES CLUSTERS STATUS ===\n"
+          REPORT="${REPORT}Time: $(date)\nHost: $(hostname)\n\n"
+          
+          HAS_PROBLEMS=false
+          
+          for CONTEXT in $CONTEXTS; do
+            REPORT="${REPORT}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            REPORT="${REPORT}🔍 CONTEXT: $CONTEXT\n"
+            REPORT="${REPORT}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Переключаемся на контекст
+            kubectl config use-context "$CONTEXT" &>/dev/null
+            
+            # Проверяем доступность
+            if ! kubectl cluster-info --request-timeout=5s &>/dev/null; then
+              REPORT="${REPORT}❌ CLUSTER UNAVAILABLE!\n\n"
+              HAS_PROBLEMS=true
+              continue
+            fi
+            
+            # Получаем статус подов
+            REPORT="${REPORT}📦 Pods:\n"
+            PODS=$(kubectl get pods --all-namespaces)
+            REPORT="${REPORT}${PODS}\n\n"
+            
+            # Проверяем проблемные поды
+            PROBLEMS=$(echo "$PODS" | grep -E "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || true)
+            if [ -n "$PROBLEMS" ]; then
+              REPORT="${REPORT}⚠️ PROBLEM PODS:\n${PROBLEMS}\n\n"
+              HAS_PROBLEMS=true
+            else
+              REPORT="${REPORT}✅ No problem pods\n\n"
+            fi
+            
+            # Получаем статус узлов
+            REPORT="${REPORT}🖥️ Nodes:\n"
+            NODES=$(kubectl get nodes)
+            REPORT="${REPORT}${NODES}\n\n"
+          done
+          
+          # Отправляем в Slack
+          if [ "$HAS_PROBLEMS" = true ]; then
+            EMOJI="🔴"
+            STATUS="PROBLEMS DETECTED"
+            EXIT_CODE=1
           else
-            STATUS="OK"
-            EMOJI="✅"
+            EMOJI="🟢"
+            STATUS="ALL HEALTHY"
+            EXIT_CODE=0
           fi
           
-          # Отправляем через файл (избегаем проблем с экранированием)
-          echo "$EMOJI K8s Monitor: $STATUS" > /tmp/slack_msg.txt
-          echo "Time: $(date)" >> /tmp/slack_msg.txt
-          echo "Host: $(hostname)" >> /tmp/slack_msg.txt
-          echo "" >> /tmp/slack_msg.txt
-          echo "Pods:" >> /tmp/slack_msg.txt
-          kubectl get pods --all-namespaces >> /tmp/slack_msg.txt
+          REPORT="${EMOJI} ${STATUS}\n\n${REPORT}"
           
-          # Отправляем (однострочный curl)
-          TEXT=$(cat /tmp/slack_msg.txt | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          # Экранируем и отправляем
+          TEXT=$(echo "$REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
           
           curl -X POST \
             -H "Authorization: Bearer $SLACK_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" \
             https://slack.com/api/chat.postMessage
+          
+          exit $EXIT_CODE
