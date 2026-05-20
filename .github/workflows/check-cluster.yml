@@ -1,4 +1,4 @@
-name: Local K8s Cluster Monitor (Simple)
+name: Local K8s Cluster Monitor
 
 on:
   schedule:
@@ -9,30 +9,33 @@ jobs:
   monitor:
     runs-on: self-hosted
     steps:
-      - name: Check and notify
+      - name: Send status to Slack
         env:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          echo "=== Мониторинг Kubernetes ==="
-          
-          # Получаем данные
-          ALL_PODS=$(kubectl get pods --all-namespaces)
-          FAILED_PODS=$(kubectl get pods --all-namespaces --no-headers | grep -E "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || true)
-          
-          # Формируем простое текстовое сообщение
-          if [ -z "$FAILED_PODS" ]; then
-            MESSAGE="✅ SUCCESS - Все поды работают нормально"
+          # Получаем статус
+          if kubectl get pods --all-namespaces | grep -qE "Error|CrashLoopBackOff|ImagePullBackOff|Pending"; then
+            STATUS="FAILED"
+            EMOJI="❌"
           else
-            MESSAGE="❌ FAILED - Обнаружены проблемные поды!"
+            STATUS="OK"
+            EMOJI="✅"
           fi
           
-          # Отправляем в Slack (простой текст, без форматирования)
+          # Отправляем через файл (избегаем проблем с экранированием)
+          echo "$EMOJI K8s Monitor: $STATUS" > /tmp/slack_msg.txt
+          echo "Time: $(date)" >> /tmp/slack_msg.txt
+          echo "Host: $(hostname)" >> /tmp/slack_msg.txt
+          echo "" >> /tmp/slack_msg.txt
+          echo "Pods:" >> /tmp/slack_msg.txt
+          kubectl get pods --all-namespaces >> /tmp/slack_msg.txt
+          
+          # Отправляем (однострочный curl)
+          TEXT=$(cat /tmp/slack_msg.txt | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          
           curl -X POST \
             -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "{
-              \"channel\": \"$SLACK_CHANNEL\",
-              \"text\": \"$MESSAGE\n\nВремя: $(date)\nХост: $(hostname)\n\nВсе поды:\n$(echo \"$ALL_PODS\" | sed 's/\"/\\\"/g')\n\n$( [ -n \"$FAILED_PODS\" ] && echo \"Проблемные поды:\n$(echo \"$FAILED_PODS\" | sed 's/\"/\\\"/g')\" )\"
-            }" \
+            -H "Content-Type: application/json" \
+            -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" \
             https://slack.com/api/chat.postMessage
