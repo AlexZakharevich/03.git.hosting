@@ -9,71 +9,51 @@ jobs:
   monitor:
     runs-on: self-hosted
     steps:
-      - name: Send pretty Slack notification
+      - name: Send Slack notification
         env:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          # Формируем красивый отчёт
-          REPORT="╔══════════════════════════════════════════════════════════╗\n"
-          REPORT="$REPORT║              🚢 KUBERNETES CLUSTERS MONITORING            ║\n"
-          REPORT="$REPORT╚══════════════════════════════════════════════════════════╝\n\n"
+          # Формируем сообщение
+          MESSAGE="*🚢 Мониторинг Kubernetes*\n\n"
+          MESSAGE="$MESSAGE*🕐 Время:* $(date '+%Y-%m-%d %H:%M:%S')\n"
+          MESSAGE="$MESSAGE*🖥️ Хост:* $(hostname)\n\n"
+          MESSAGE="$MESSAGE*📊 Состояние кластеров:*\n"
           
-          # Получаем контексты
-          CONTEXTS=$(kubectl config get-contexts -o name)
+          ALL_OK=true
           
-          # Заголовок таблицы
-          REPORT="$REPORT┌─────────────────────┬───────────┬────────────┬────────────────────────┐\n"
-          REPORT="$REPORT│ CONTEXT             │ STATUS    │ PODS/NODES │ ISSUES                 │\n"
-          REPORT="$REPORT├─────────────────────┼───────────┼────────────┼────────────────────────┤\n"
-          
-          OVERALL_STATUS="healthy"
-          
-          for CONTEXT in $CONTEXTS; do
+          for CONTEXT in $(kubectl config get-contexts -o name); do
             kubectl config use-context "$CONTEXT" &>/dev/null
             
             if ! kubectl cluster-info --request-timeout=5s &>/dev/null; then
-              STATUS="🔴 DOWN"
-              PODS_INFO="N/A"
-              ISSUES="Connection failed"
-              OVERALL_STATUS="unhealthy"
-            else
-              TOTAL_PODS=$(kubectl get pods --all-namespaces --no-headers 2>&1 | wc -l)
-              TOTAL_NODES=$(kubectl get nodes --no-headers 2>&1 | wc -l)
-              PROBLEM_COUNT=$(kubectl get pods --all-namespaces --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|Pending" || echo "0")
-              
-              if [ "$PROBLEM_COUNT" -gt 0 ]; then
-                STATUS="⚠️ WARNING"
-                ISSUES="$PROBLEM_COUNT problem pods"
-                OVERALL_STATUS="unhealthy"
-              else
-                STATUS="✅ OK"
-                ISSUES="None"
-              fi
-              PODS_INFO="$TOTAL_PODS/$TOTAL_NODES"
+              MESSAGE="$MESSAGE\n❌ *$CONTEXT* — НЕДОСТУПЕН"
+              ALL_OK=false
+              continue
             fi
             
-            # Форматируем строку таблицы
-            CONTEXT_NAME=$(echo "$CONTEXT" | cut -c1-19)
-            printf -v LINE "│ %-19s │ %-9s │ %-10s │ %-22s │\n" "$CONTEXT_NAME" "$STATUS" "$PODS_INFO" "$ISSUES"
-            REPORT="$REPORT$LINE"
+            TOTAL_PODS=$(kubectl get pods --all-namespaces --no-headers 2>&1 | wc -l)
+            PROBLEM_PODS=$(kubectl get pods --all-namespaces --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|Pending" || echo "0")
+            
+            if [ "$PROBLEM_PODS" -gt 0 ]; then
+              MESSAGE="$MESSAGE\n⚠️ *$CONTEXT* — ПРОБЛЕМЫ"
+              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS)"
+              ALL_OK=false
+            else
+              MESSAGE="$MESSAGE\n✅ *$CONTEXT* — ЗДОРОВ"
+              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS"
+            fi
           done
           
-          REPORT="$REPORT└─────────────────────┴───────────┴────────────┴────────────────────────┘\n\n"
-          
-          # Добавляем итоговый статус
-          if [ "$OVERALL_STATUS" = "healthy" ]; then
-            REPORT="$REPORT🟢 *ИТОГ: ВСЕ КЛАСТЕРЫ РАБОТАЮТ НОРМАЛЬНО*\n"
-            EXIT_CODE=0
+          # Итог
+          MESSAGE="$MESSAGE\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ "$ALL_OK" = true ]; then
+            MESSAGE="$MESSAGE\n🟢 *ИТОГ: ВСЕ КЛАСТЕРЫ РАБОТАЮТ*"
           else
-            REPORT="$REPORT🔴 *ИТОГ: ОБНАРУЖЕНЫ ПРОБЛЕМЫ! Требуется внимание*\n"
-            EXIT_CODE=1
+            MESSAGE="$MESSAGE\n🔴 *ИТОГ: ЕСТЬ ПРОБЛЕМЫ!*"
           fi
           
-          REPORT="$REPORT\n🕐 $(date '+%Y-%m-%d %H:%M:%S') | 🖥️ $(hostname)"
-          
-          # Отправляем в Slack
-          TEXT=$(echo "$REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          # Отправляем
+          TEXT=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
           
           curl -X POST \
             -H "Authorization: Bearer $SLACK_TOKEN" \
@@ -81,4 +61,4 @@ jobs:
             -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" \
             https://slack.com/api/chat.postMessage
           
-          exit $EXIT_CODE
+          [ "$ALL_OK" = true ] && exit 0 || exit 1
