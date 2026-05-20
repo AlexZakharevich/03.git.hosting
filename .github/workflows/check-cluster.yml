@@ -9,79 +9,20 @@ jobs:
   monitor:
     runs-on: self-hosted
     steps:
-      - name: Send Slack notification
+      - name: Send to Slack
         env:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
-          # Объединяем все конфиги
           KUBECONFIG: /home/alex/.kube/config:/home/alex/.kube/config-k3s:/home/alex/.kube/config-k8s
         run: |
-          echo "=== ВСЕ КОНТЕКСТЫ ==="
-          kubectl config get-contexts -o name
-          echo ""
+          REPORT=""
           
-          # Получаем контексты
-          CONTEXTS=$(kubectl config get-contexts -o name | tr '\n' ' ')
-          echo "Контексты: $CONTEXTS"
-          echo ""
-          
-          MESSAGE="🚢 *Мониторинг Kubernetes*\n\n"
-          MESSAGE="$MESSAGE🕐 *Время:* $(date '+%Y-%m-%d %H:%M:%S')\n"
-          MESSAGE="$MESSAGE🖥️ *Хост:* $(hostname)\n\n"
-          MESSAGE="$MESSAGE📊 *Состояние кластеров:*\n\n"
-          
-          ALL_OK=true
-          CONTEXT_COUNT=0
-          
-          for CONTEXT in $CONTEXTS; do
-            CONTEXT_COUNT=$((CONTEXT_COUNT + 1))
-            echo "Проверяем: $CONTEXT"
+          for CTX in minikube k3s k8s; do
+            REPORT="$REPORT━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📍 $CTX\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            REPORT="$REPORTTime: $(date '+%a %b %d %H:%M:%S %z %Y')\nHost: $(hostname)\n\nPods:\n\`\`\`\n"
             
-            if ! kubectl cluster-info --context="$CONTEXT" --request-timeout=5s &>/dev/null; then
-              MESSAGE="$MESSAGE❌ *$CONTEXT* — НЕДОСТУПЕН\n"
-              MESSAGE="$MESSAGE   • Кластер не отвечает\n\n"
-              ALL_OK=false
-              continue
-            fi
-            
-            TOTAL_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | wc -l | tr -d ' ')
-            PROBLEM_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|Pending|ImagePullBackOff" | tr -d ' ')
-            NODES=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | wc -l | tr -d ' ')
-            VERSION=$(kubectl version --context="$CONTEXT" --short 2>/dev/null | grep "Server Version" | awk '{print $3}' || echo "N/A")
-            
-            if [ "$PROBLEM_PODS" -gt 0 ]; then
-              MESSAGE="$MESSAGE⚠️ *$CONTEXT* — ПРОБЛЕМЫ\n"
-              MESSAGE="$MESSAGE   • 📦 Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS)\n"
-              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES\n"
-              MESSAGE="$MESSAGE   • 🔢 Версия: $VERSION\n\n"
-              ALL_OK=false
-            else
-              MESSAGE="$MESSAGE✅ *$CONTEXT* — ЗДОРОВ\n"
-              MESSAGE="$MESSAGE   • 📦 Поды: $TOTAL_PODS\n"
-              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES\n"
-              MESSAGE="$MESSAGE   • 🔢 Версия: $VERSION\n\n"
-            fi
+            REPORT="$REPORT$(kubectl get pods --all-namespaces --context="$CTX" --request-timeout=5s 2>&1 | head -20)\n\`\`\`\n\n"
           done
           
-          MESSAGE="$MESSAGE━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-          
-          if [ "$ALL_OK" = true ]; then
-            MESSAGE="$MESSAGE🟢 *ИТОГ: ВСЕ $CONTEXT_COUNT КЛАСТЕРОВ РАБОТАЮТ НОРМАЛЬНО*\n"
-            EXIT_CODE=0
-          else
-            MESSAGE="$MESSAGE🔴 *ИТОГ: ОБНАРУЖЕНЫ ПРОБЛЕМЫ!*\n"
-            EXIT_CODE=1
-          fi
-          
-          MESSAGE="$MESSAGE\n🔄 Следующая проверка через 1 час"
-          
-          # Отправляем в Slack
-          TEXT=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-          
-          curl -s -X POST \
-            -H "Authorization: Bearer $SLACK_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" \
-            https://slack.com/api/chat.postMessage
-          
-          exit $EXIT_CODE
+          TEXT=$(echo "$REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          curl -s -X POST -H "Authorization: Bearer $SLACK_TOKEN" -H "Content-Type: application/json" -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" https://slack.com/api/chat.postMessage
