@@ -1,46 +1,38 @@
-name: Local K8s Cluster Monitor
+name: Local K8s Cluster Monitor (Simple)
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # каждые 10 минут
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
   monitor:
-    runs-on: self-hosted    # Будет выполняться на вашем локальном runner
+    runs-on: self-hosted
     steps:
-      - name: Check pod status
+      - name: Check and notify
         env:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          echo "=== Мониторинг локального кластера Kubernetes ==="
+          echo "=== Мониторинг Kubernetes ==="
           
-          # Проверяем поды
-          ALL_PODS=$(kubectl get pods --all-namespaces 2>&1)
-          FAILED_PODS=$(kubectl get pods --all-namespaces --no-headers 2>&1 | grep -E "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || true)
+          # Получаем данные
+          ALL_PODS=$(kubectl get pods --all-namespaces)
+          FAILED_PODS=$(kubectl get pods --all-namespaces --no-headers | grep -E "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || true)
           
+          # Формируем простое текстовое сообщение
           if [ -z "$FAILED_PODS" ]; then
-            echo "✅ Все поды здоровы"
-            STATUS="✅ SUCCESS"
-            MESSAGE="Все поды в кластере работают нормально"
+            MESSAGE="✅ SUCCESS - Все поды работают нормально"
           else
-            echo "❌ Найдены проблемные поды:"
-            echo "$FAILED_PODS"
-            STATUS="❌ FAILED"
-            MESSAGE="Обнаружены проблемные поды в кластере!"
+            MESSAGE="❌ FAILED - Обнаружены проблемные поды!"
           fi
           
-          # Отправляем в Slack (если настроен токен)
-          if [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_CHANNEL" ]; then
-            curl -X POST -H "Authorization: Bearer $SLACK_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"channel\": \"$SLACK_CHANNEL\",
-                \"text\": \"*$STATUS*\n$MESSAGE\nВремя: $(date)\nХост: $(hostname)\n\n*Все поды:*\n\`\`\`\n$ALL_PODS\n\`\`\`\" \
-                $([ -n \"$FAILED_PODS\" ] && echo \"\n\n*Проблемные поды:*\n\`\`\`\n$FAILED_PODS\n\`\`\`\")
-              }" \
-              https://slack.com/api/chat.postMessage
-          else
-            echo "Slack не настроен — пропускаем уведомление"
-          fi
+          # Отправляем в Slack (простой текст, без форматирования)
+          curl -X POST \
+            -H "Authorization: Bearer $SLACK_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{
+              \"channel\": \"$SLACK_CHANNEL\",
+              \"text\": \"$MESSAGE\n\nВремя: $(date)\nХост: $(hostname)\n\nВсе поды:\n$(echo \"$ALL_PODS\" | sed 's/\"/\\\"/g')\n\n$( [ -n \"$FAILED_PODS\" ] && echo \"Проблемные поды:\n$(echo \"$FAILED_PODS\" | sed 's/\"/\\\"/g')\" )\"
+            }" \
+            https://slack.com/api/chat.postMessage
