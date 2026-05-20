@@ -13,18 +13,18 @@ jobs:
         env:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
+          # Объединяем все конфиги
+          KUBECONFIG: /home/alex/.kube/config:/home/alex/.kube/config-k3s:/home/alex/.kube/config-k8s
         run: |
-          # Убеждаемся, что kubectl видит правильный kubeconfig
-          export KUBECONFIG="$HOME/.kube/config"
-          
-          # Получаем контексты через pipe с tr для правильной обработки
-          CONTEXTS=$(kubectl config get-contexts -o name | tr '\n' ' ')
-          
-          echo "=== НАЙДЕННЫЕ КОНТЕКСТЫ ==="
-          echo "$CONTEXTS"
+          echo "=== ВСЕ КОНТЕКСТЫ ==="
+          kubectl config get-contexts -o name
           echo ""
           
-          # Начинаем формировать сообщение
+          # Получаем контексты
+          CONTEXTS=$(kubectl config get-contexts -o name | tr '\n' ' ')
+          echo "Контексты: $CONTEXTS"
+          echo ""
+          
           MESSAGE="🚢 *Мониторинг Kubernetes*\n\n"
           MESSAGE="$MESSAGE🕐 *Время:* $(date '+%Y-%m-%d %H:%M:%S')\n"
           MESSAGE="$MESSAGE🖥️ *Хост:* $(hostname)\n\n"
@@ -33,101 +33,55 @@ jobs:
           ALL_OK=true
           CONTEXT_COUNT=0
           
-          # Перебираем каждый контекст
           for CONTEXT in $CONTEXTS; do
             CONTEXT_COUNT=$((CONTEXT_COUNT + 1))
+            echo "Проверяем: $CONTEXT"
             
-            echo "Проверяем контекст: [$CONTEXT]"
-            
-            # Проверяем доступность кластера
             if ! kubectl cluster-info --context="$CONTEXT" --request-timeout=5s &>/dev/null; then
               MESSAGE="$MESSAGE❌ *$CONTEXT* — НЕДОСТУПЕН\n"
-              MESSAGE="$MESSAGE   • Кластер не отвечает на запросы\n\n"
+              MESSAGE="$MESSAGE   • Кластер не отвечает\n\n"
               ALL_OK=false
               continue
             fi
             
-            # Получаем количество подов
-            TOTAL_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | wc -l)
-            TOTAL_PODS=$(echo "$TOTAL_PODS" | tr -d ' ')
-            
-            # Ищем проблемные поды
-            PROBLEM_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || echo "0")
-            PROBLEM_PODS=$(echo "$PROBLEM_PODS" | tr -d ' ')
-            
-            # Получаем количество узлов
-            NODES_COUNT=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | wc -l)
-            NODES_COUNT=$(echo "$NODES_COUNT" | tr -d ' ')
-            
-            # Версия Kubernetes
-            K8S_VERSION=$(kubectl version --context="$CONTEXT" --short 2>/dev/null | grep "Server Version" | awk '{print $3}' || echo "unknown")
+            TOTAL_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | wc -l | tr -d ' ')
+            PROBLEM_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|Pending|ImagePullBackOff" | tr -d ' ')
+            NODES=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | wc -l | tr -d ' ')
+            VERSION=$(kubectl version --context="$CONTEXT" --short 2>/dev/null | grep "Server Version" | awk '{print $3}' || echo "N/A")
             
             if [ "$PROBLEM_PODS" -gt 0 ]; then
               MESSAGE="$MESSAGE⚠️ *$CONTEXT* — ПРОБЛЕМЫ\n"
-              MESSAGE="$MESSAGE   • 🐳 Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS)\n"
-              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES_COUNT\n"
-              MESSAGE="$MESSAGE   • 🔢 Версия: $K8S_VERSION\n\n"
+              MESSAGE="$MESSAGE   • 📦 Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS)\n"
+              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES\n"
+              MESSAGE="$MESSAGE   • 🔢 Версия: $VERSION\n\n"
               ALL_OK=false
             else
               MESSAGE="$MESSAGE✅ *$CONTEXT* — ЗДОРОВ\n"
-              MESSAGE="$MESSAGE   • 🐳 Поды: $TOTAL_PODS\n"
-              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES_COUNT\n"
-              MESSAGE="$MESSAGE   • 🔢 Версия: $K8S_VERSION\n\n"
+              MESSAGE="$MESSAGE   • 📦 Поды: $TOTAL_PODS\n"
+              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES\n"
+              MESSAGE="$MESSAGE   • 🔢 Версия: $VERSION\n\n"
             fi
           done
           
-          # Добавляем итог
           MESSAGE="$MESSAGE━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
           
           if [ "$ALL_OK" = true ]; then
             MESSAGE="$MESSAGE🟢 *ИТОГ: ВСЕ $CONTEXT_COUNT КЛАСТЕРОВ РАБОТАЮТ НОРМАЛЬНО*\n"
             EXIT_CODE=0
           else
-            MESSAGE="$MESSAGE🔴 *ИТОГ: ОБНАРУЖЕНЫ ПРОБЛЕМЫ! ТРЕБУЕТСЯ ВНИМАНИЕ*\n"
+            MESSAGE="$MESSAGE🔴 *ИТОГ: ОБНАРУЖЕНЫ ПРОБЛЕМЫ!*\n"
             EXIT_CODE=1
           fi
           
           MESSAGE="$MESSAGE\n🔄 Следующая проверка через 1 час"
           
-          # Выводим в лог для отладки
-          echo "=== ОТПРАВЛЯЕМ В SLACK ==="
-          echo "$MESSAGE"
-          echo ""
-          echo "=== КОНЕЦ СООБЩЕНИЯ ==="
-          
           # Отправляем в Slack
           TEXT=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
           
-          RESPONSE=$(curl -s -X POST \
+          curl -s -X POST \
             -H "Authorization: Bearer $SLACK_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" \
-            https://slack.com/api/chat.postMessage)
-          
-          echo "Ответ Slack: $RESPONSE"
+            https://slack.com/api/chat.postMessage
           
           exit $EXIT_CODE
-      
-      - name: Debug kubectl contexts
-        run: |
-          echo "=== ДИАГНОСТИКА KUBECTL ==="
-          echo "KUBECONFIG: $KUBECONFIG"
-          echo "HOME: $HOME"
-          echo ""
-          echo "=== Файл kubeconfig ==="
-          ls -la $HOME/.kube/config || echo "Файл не найден"
-          echo ""
-          echo "=== Все контексты ==="
-          kubectl config get-contexts
-          echo ""
-          echo "=== Имена контекстов ==="
-          kubectl config get-contexts -o name
-          echo ""
-          echo "=== Текущий контекст ==="
-          kubectl config current-context
-          echo ""
-          echo "=== Проверка каждого контекста ==="
-          for ctx in $(kubectl config get-contexts -o name); do
-            echo "--- $ctx ---"
-            kubectl cluster-info --context="$ctx" --request-timeout=3s 2>&1 | head -1
-          done
