@@ -3,7 +3,7 @@ name: Local K8s Cluster Monitor
 on:
   schedule:
     - cron: '1 * * * *'
-  #workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
   monitor:
