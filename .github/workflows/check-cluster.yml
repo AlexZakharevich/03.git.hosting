@@ -14,51 +14,82 @@ jobs:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          # Формируем сообщение
-          MESSAGE="*🚢 Мониторинг Kubernetes*\n\n"
-          MESSAGE="$MESSAGE*🕐 Время:* $(date '+%Y-%m-%d %H:%M:%S')\n"
-          MESSAGE="$MESSAGE*🖥️ Хост:* $(hostname)\n\n"
-          MESSAGE="$MESSAGE*📊 Состояние кластеров:*\n"
+          # Получаем список всех контекстов
+          CONTEXTS=$(kubectl config get-contexts -o name)
+          
+          # Начинаем формировать сообщение
+          MESSAGE="🚢 *Мониторинг Kubernetes*\n\n"
+          MESSAGE="$MESSAGE🕐 *Время:* $(date '+%Y-%m-%d %H:%M:%S')\n"
+          MESSAGE="$MESSAGE🖥️ *Хост:* $(hostname)\n\n"
+          MESSAGE="$MESSAGE📊 *Состояние кластеров:*\n\n"
           
           ALL_OK=true
+          CONTEXT_COUNT=0
           
-          for CONTEXT in $(kubectl config get-contexts -o name); do
-            kubectl config use-context "$CONTEXT" &>/dev/null
+          # Перебираем каждый контекст
+          while IFS= read -r CONTEXT; do
+            CONTEXT_COUNT=$((CONTEXT_COUNT + 1))
             
-            if ! kubectl cluster-info --request-timeout=5s &>/dev/null; then
-              MESSAGE="$MESSAGE\n❌ *$CONTEXT* — НЕДОСТУПЕН"
+            echo "Проверяем контекст: $CONTEXT"
+            
+            # Используем --context для каждой команды
+            if ! kubectl cluster-info --context="$CONTEXT" --request-timeout=5s &>/dev/null; then
+              MESSAGE="$MESSAGE❌ *$CONTEXT* — НЕДОСТУПЕН\n"
               ALL_OK=false
               continue
             fi
             
-            TOTAL_PODS=$(kubectl get pods --all-namespaces --no-headers 2>&1 | wc -l)
-            PROBLEM_PODS=$(kubectl get pods --all-namespaces --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|Pending" || echo "0")
+            # Получаем количество подов
+            TOTAL_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | wc -l)
             
-            if [ "$PROBLEM_PODS" -gt 0 ]; then
-              MESSAGE="$MESSAGE\n⚠️ *$CONTEXT* — ПРОБЛЕМЫ"
-              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS)"
+            # Ищем проблемные поды
+            PROBLEM_PODS_COUNT=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || echo "0")
+            
+            # Проверяем узлы
+            NODES_COUNT=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | wc -l)
+            PROBLEM_NODES=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | grep -cE "NotReady|Unknown" || echo "0")
+            
+            if [ "$PROBLEM_PODS_COUNT" -gt 0 ] || [ "$PROBLEM_NODES" -gt 0 ]; then
+              MESSAGE="$MESSAGE⚠️ *$CONTEXT* — ПРОБЛЕМЫ\n"
+              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS_COUNT)\n"
+              MESSAGE="$MESSAGE   • Узлы: $NODES_COUNT (проблемных: $PROBLEM_NODES)\n"
               ALL_OK=false
             else
-              MESSAGE="$MESSAGE\n✅ *$CONTEXT* — ЗДОРОВ"
-              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS"
+              MESSAGE="$MESSAGE✅ *$CONTEXT* — ЗДОРОВ\n"
+              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS\n"
+              MESSAGE="$MESSAGE   • Узлы: $NODES_COUNT\n"
             fi
-          done
+            
+            MESSAGE="$MESSAGE\n"
+            
+          done <<< "$CONTEXTS"
           
-          # Итог
-          MESSAGE="$MESSAGE\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          # Добавляем итог
+          MESSAGE="$MESSAGE━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+          
           if [ "$ALL_OK" = true ]; then
-            MESSAGE="$MESSAGE\n🟢 *ИТОГ: ВСЕ КЛАСТЕРЫ РАБОТАЮТ*"
+            MESSAGE="$MESSAGE🟢 *ИТОГ: ВСЕ $CONTEXT_COUNT КЛАСТЕРОВ РАБОТАЮТ НОРМАЛЬНО*\n"
+            EXIT_CODE=0
           else
-            MESSAGE="$MESSAGE\n🔴 *ИТОГ: ЕСТЬ ПРОБЛЕМЫ!*"
+            MESSAGE="$MESSAGE🔴 *ИТОГ: ОБНАРУЖЕНЫ ПРОБЛЕМЫ! ТРЕБУЕТСЯ ВНИМАНИЕ*\n"
+            EXIT_CODE=1
           fi
           
-          # Отправляем
+          MESSAGE="$MESSAGE\n🔄 Следующая проверка через 1 час"
+          
+          # Выводим в лог для отладки
+          echo "=== ОТПРАВЛЯЕМ В SLACK ==="
+          echo "$MESSAGE"
+          
+          # Отправляем в Slack
           TEXT=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
           
-          curl -X POST \
+          RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $SLACK_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"channel\":\"$SLACK_CHANNEL\",\"text\":$TEXT}" \
-            https://slack.com/api/chat.postMessage
+            https://slack.com/api/chat.postMessage)
           
-          [ "$ALL_OK" = true ] && exit 0 || exit 1
+          echo "Ответ Slack: $RESPONSE"
+          
+          exit $EXIT_CODE
