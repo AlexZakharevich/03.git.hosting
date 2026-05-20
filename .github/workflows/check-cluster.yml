@@ -14,8 +14,15 @@ jobs:
           SLACK_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          # Получаем список всех контекстов
-          CONTEXTS=$(kubectl config get-contexts -o name)
+          # Убеждаемся, что kubectl видит правильный kubeconfig
+          export KUBECONFIG="$HOME/.kube/config"
+          
+          # Получаем контексты через pipe с tr для правильной обработки
+          CONTEXTS=$(kubectl config get-contexts -o name | tr '\n' ' ')
+          
+          echo "=== НАЙДЕННЫЕ КОНТЕКСТЫ ==="
+          echo "$CONTEXTS"
+          echo ""
           
           # Начинаем формировать сообщение
           MESSAGE="🚢 *Мониторинг Kubernetes*\n\n"
@@ -27,42 +34,47 @@ jobs:
           CONTEXT_COUNT=0
           
           # Перебираем каждый контекст
-          while IFS= read -r CONTEXT; do
+          for CONTEXT in $CONTEXTS; do
             CONTEXT_COUNT=$((CONTEXT_COUNT + 1))
             
-            echo "Проверяем контекст: $CONTEXT"
+            echo "Проверяем контекст: [$CONTEXT]"
             
-            # Используем --context для каждой команды
+            # Проверяем доступность кластера
             if ! kubectl cluster-info --context="$CONTEXT" --request-timeout=5s &>/dev/null; then
               MESSAGE="$MESSAGE❌ *$CONTEXT* — НЕДОСТУПЕН\n"
+              MESSAGE="$MESSAGE   • Кластер не отвечает на запросы\n\n"
               ALL_OK=false
               continue
             fi
             
             # Получаем количество подов
             TOTAL_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | wc -l)
+            TOTAL_PODS=$(echo "$TOTAL_PODS" | tr -d ' ')
             
             # Ищем проблемные поды
-            PROBLEM_PODS_COUNT=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || echo "0")
+            PROBLEM_PODS=$(kubectl get pods --all-namespaces --context="$CONTEXT" --no-headers 2>&1 | grep -cE "Error|CrashLoopBackOff|ImagePullBackOff|Pending" || echo "0")
+            PROBLEM_PODS=$(echo "$PROBLEM_PODS" | tr -d ' ')
             
-            # Проверяем узлы
+            # Получаем количество узлов
             NODES_COUNT=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | wc -l)
-            PROBLEM_NODES=$(kubectl get nodes --context="$CONTEXT" --no-headers 2>&1 | grep -cE "NotReady|Unknown" || echo "0")
+            NODES_COUNT=$(echo "$NODES_COUNT" | tr -d ' ')
             
-            if [ "$PROBLEM_PODS_COUNT" -gt 0 ] || [ "$PROBLEM_NODES" -gt 0 ]; then
+            # Версия Kubernetes
+            K8S_VERSION=$(kubectl version --context="$CONTEXT" --short 2>/dev/null | grep "Server Version" | awk '{print $3}' || echo "unknown")
+            
+            if [ "$PROBLEM_PODS" -gt 0 ]; then
               MESSAGE="$MESSAGE⚠️ *$CONTEXT* — ПРОБЛЕМЫ\n"
-              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS_COUNT)\n"
-              MESSAGE="$MESSAGE   • Узлы: $NODES_COUNT (проблемных: $PROBLEM_NODES)\n"
+              MESSAGE="$MESSAGE   • 🐳 Поды: $TOTAL_PODS (проблемных: $PROBLEM_PODS)\n"
+              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES_COUNT\n"
+              MESSAGE="$MESSAGE   • 🔢 Версия: $K8S_VERSION\n\n"
               ALL_OK=false
             else
               MESSAGE="$MESSAGE✅ *$CONTEXT* — ЗДОРОВ\n"
-              MESSAGE="$MESSAGE   • Поды: $TOTAL_PODS\n"
-              MESSAGE="$MESSAGE   • Узлы: $NODES_COUNT\n"
+              MESSAGE="$MESSAGE   • 🐳 Поды: $TOTAL_PODS\n"
+              MESSAGE="$MESSAGE   • 🖥️ Узлы: $NODES_COUNT\n"
+              MESSAGE="$MESSAGE   • 🔢 Версия: $K8S_VERSION\n\n"
             fi
-            
-            MESSAGE="$MESSAGE\n"
-            
-          done <<< "$CONTEXTS"
+          done
           
           # Добавляем итог
           MESSAGE="$MESSAGE━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -80,6 +92,8 @@ jobs:
           # Выводим в лог для отладки
           echo "=== ОТПРАВЛЯЕМ В SLACK ==="
           echo "$MESSAGE"
+          echo ""
+          echo "=== КОНЕЦ СООБЩЕНИЯ ==="
           
           # Отправляем в Slack
           TEXT=$(echo "$MESSAGE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
