@@ -107,26 +107,27 @@ jobs:
           echo "Ответ Slack: $RESPONSE"
           
           exit $EXIT_CODE
+      
       - name: Debug kubectl contexts
-          run: |
-              echo "=== ДИАГНОСТИКА KUBECTL ==="
-              echo "KUBECONFIG: $KUBECONFIG"
-              echo "HOME: $HOME"
-              echo ""
-              echo "=== Файл kubeconfig ==="
-              ls -la $HOME/.kube/config || echo "Файл не найден"
-              echo ""
-              echo "=== Все контексты ==="
-              kubectl config get-contexts
-              echo ""
-              echo "=== Имена контекстов ==="
-              kubectl config get-contexts -o name
-              echo ""
-              echo "=== Текущий контекст ==="
-              kubectl config current-context
-              echo ""
-              echo "=== Проверка каждого контекста ==="
-              for ctx in $(kubectl config get-contexts -o name); do
-                echo "--- $ctx ---"
-                kubectl cluster-info --context="$ctx" --request-timeout=3s 2>&1 | head -1
-              done
+        run: |
+          echo "=== ДИАГНОСТИКА KUBECTL ==="
+          echo "KUBECONFIG: $KUBECONFIG"
+          echo "HOME: $HOME"
+          echo ""
+          echo "=== Файл kubeconfig ==="
+          ls -la $HOME/.kube/config || echo "Файл не найден"
+          echo ""
+          echo "=== Все контексты ==="
+          kubectl config get-contexts
+          echo ""
+          echo "=== Имена контекстов ==="
+          kubectl config get-contexts -o name
+          echo ""
+          echo "=== Текущий контекст ==="
+          kubectl config current-context
+          echo ""
+          echo "=== Проверка каждого контекста ==="
+          for ctx in $(kubectl config get-contexts -o name); do
+            echo "--- $ctx ---"
+            kubectl cluster-info --context="$ctx" --request-timeout=3s 2>&1 | head -1
+          done
